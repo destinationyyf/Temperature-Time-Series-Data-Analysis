@@ -1,0 +1,300 @@
+---
+output:
+  pdf_document:
+    fig_caption: True
+---
+\fontsize{11}{15}
+\fontseries{m}
+\selectfont
+
+```{r,echo=F,message=F,warning=F}
+library(faraway)
+library(astsa)
+library(pander)
+```
+
+# 1. Descriptive Analysis
+
+There are 3 `-99.9`s (first, last, last but one) in the dataset, which shows there is no actual value recorded, so I replace them by NAs and summary the dataset.
+
+```{r,echo=F,comment=""}
+temp = read.table("Temperature.txt",header = T)
+temp[temp == -99.9] = NA # Substitue -99.9s with NAs
+set.caption("Summary of the Dataset")
+pander(summary(temp[,2:5]))
+
+temp00 = as.vector(t(temp[,2:5]))
+temp0 = temp00[-c(1,length(temp00),length(temp00)-1)] # Vectorize the matrix
+```
+
+We can see the general order in temperature `JJA (summer) > SON (autumn) > MAM (spring) > DJF (winter)`
+
+#2. Overall trend
+
+Here I use two ways to detect the overall trend of the data: simple linear regression and kernel smoothing (`bandwidth = 40/n`) (10 years).
+
+##2.1 Linear Regression
+
+The linear model we are going to fit is:
+
+$$y_t=\alpha_0t+\alpha_1t^2+\alpha_2t^3+\beta_1Q_1(t)+\beta_2Q_2(t)+\beta_3Q_3(t)+\beta_4Q_4(t)+\epsilon_t$$
+
+In which the indicator functions $Q_1(t)$ to $Q_4(t)$ correspond with winter, spring, summer and autumn and `t` ranges from 1 to the last season recorded. And by testing that the $t^4$ term will not be significant, so I only take the highest as cubic term in the model. Here are the model results:
+
+```{r,echo=F,comment=""}
+Q = factor(c(2,3,4,rep(1:4, 357),1,2))
+t = seq(length(temp0))
+fit11 = lm(temp0 ~ t + I(t^2) + I(t^3) + Q - 1)
+round(summary(fit11)$coef[,c(1,4)],6)
+pred11 = predict(fit11)
+```
+
+So the whole model is:
+
+$$
+\hat{y}_t=2.54*10^{-3}t-4.29*10^{-6}t^2+2.32*10^{-9}t^3+3.15Q_1(t)+7.58Q_2(t)+14.72Q_3(t)+9.12Q_4(t)
+$$
+
+The whold model reaches R-Sqaured 0.99, so it fits pretty well. and the p-value for estimated coefficient of all `t` terms are extremely small, so there is significant increasing trend in the temperature by years.
+
+##2.2 Plots for annual and for different seasons
+
+Combining linear models and kernel smooting with bandwidth 40/n (10 years), I make plots for annual temperature and seasonal temperature seperately:
+
+```{r,echo=F,comment=""}
+year = rep(1659:2017, each = 4)[-c(1, 1435, 1436)]
+plot(ksmooth(time(temp0), temp0, "normal", bandwidth = 40), cex.axis = 0.7, type = "l",
+     xaxt = "n", xlab = "Year", ylab = "Temperature", main = "Annual")
+axis(1, year, labels = year[seq(1, 1433, 200)], at = time(temp0)[seq(1, 1433, 200)],
+     cex.axis = .7)
+abline(lm(temp0 ~ t), lty = 2)
+```
+
+```{r,echo=F}
+par(mfrow=c(2,2))
+year_sep = 1659:2017
+name = c("Winter", "Spring", "Summer", "Autumn")
+plot_1 = function(index)
+{
+  plot(ksmooth(time(temp[, index]), temp[, index], "normal", bandwidth = 10), type = "l",
+       xlab = "Year", cex.axis = .7, ylab = "Temperature", xaxt = "n",
+       main = name[index - 1])
+  axis(1, year_sep, labels = year_sep[seq(1, 359, 50)], 
+       at = time(year_sep)[seq(1, 359, 50)], cex.axis = .7)
+  abline(lm(temp[, index] ~ seq(length(temp[, index]))), lty = 2)
+  return(0)
+}
+result = sapply(2:5, plot_1)
+```
+
+From both methods, we can see the increasing trend in temperature over years, though the increase in summer is the smallest, it is still significant under 5% level.
+
+##2.3 Did global warming slow down in 21st century?
+
+In order to testify that claim, I divide the whole time period into three parts, 1659~1899, 1900~1999 and 2000~2017, and do three linear regression. The estimated lines are shown as the red dotted lines.
+
+```{r,echo=F,comment=""}
+temp1 = temp[1:241,]; temp2 = temp[242:341,]; temp3 = temp[342:359,]
+temp10 = as.vector(t(temp1[,2:5]))[-1]
+temp20 = as.vector(t(temp2[,2:5]))
+temp30 = as.vector(t(temp3[,2:5]))[-c(71,72)]
+
+## 3 linear models
+coef1 = round(summary(lm(temp10 ~ seq(length(temp10))))$coef[2,1],5)
+coef2 = round(summary(lm(temp20 ~ seq(length(temp20))))$coef[2,1],5)
+coef3 = round(summary(lm(temp30 ~ seq(length(temp30))))$coef[2,1],5)
+
+## Comparison to the original plot
+plot(ksmooth(time(temp0), temp0, "normal", bandwidth = 40), cex.axis = 0.7, type = "l",
+     xaxt = "n", xlab = "Year", ylab = "Temperature", main = "Annual")
+axis(1, year, labels = year[seq(1, 1433, 200)], at = time(temp0)[seq(1, 1433, 200)],
+     cex.axis = .7)
+abline(lm(temp0 ~ t), lty = 2)
+
+lines(c(1,963),c(8.905,9.2117),lty=3,col="red")
+lines(c(964,1363),c(9.122,9.8569),lty=3,col="red")
+lines(c(1364,1433),c(10.236,10.0720),lty=3,col="red")
+```
+
+We can see that the overall trend in 21st century is decreasing rather than increasing, so here comes the question, in which season the temperature decreases the most?
+
+The coefficients and plots for different seansons in 21st century are in Table2 ad following figure:
+
+```{r,echo=F,comment=""}
+Q1 = factor(c(rep(1:4, 17),1,2))
+st21 = cbind(temp30,Q1)
+
+## Allocate data into corresponding season
+st211 = subset(st21,Q1==1); st212 = subset(st21,Q1==2)
+st213 = subset(st21,Q1==3); st214 = subset(st21,Q1==4)
+
+## Build linear models according to different seasons
+winter = summary(lm(st211[,1] ~ seq(18)))$coef[2,1]
+spring = summary(lm(st212[,1] ~ seq(18)))$coef[2,1]
+summer = summary(lm(st213[,1] ~ seq(17)))$coef[2,1]
+autumn = summary(lm(st214[,1] ~ seq(17)))$coef[2,1]
+
+## Table of coefficients
+set.caption("Coefficients for different seasons")
+pander(data.frame(winter=winter,spring=spring,summer=summer,autumn=autumn))
+
+## Plot
+par(mfrow=c(2,2))
+plot(seq(length(temp[342:359,2])) + 2000, cex.axis = 0.7,
+     temp[342:359,2],type="l",xlab="Year", ylab="Temperature", main="Winter")
+plot(seq(length(temp[342:359,3])) + 2000, cex.axis = 0.7,
+     temp[342:359,3],type="l",xlab="Year", ylab="Temperature", main="Spring")
+plot(seq(length(temp[342:359,4])) + 2000, cex.axis = 0.7,
+     temp[342:359,4],type="l",xlab="Year", ylab="Temperature", main="Summer")
+plot(seq(length(temp[342:359,5])) + 2000, cex.axis = 0.7,
+     temp[342:359,5],type="l",xlab="Year", ylab="Temperature", main="Autumn")
+```
+
+We can see that the main cause of decrease in 21st is in summer, which the coefficient is $-0.036$, much larger than other seasons in absolute value.
+
+However, using only the simplest linear regression and with 17 years' data may not be persuasive, which we can see from the plot that the only reason for summer has such large negative coefficient is that there two relatively high values. More importantly, the time predictor in all 5 linear models above have very large p-values, so we cannot confirm the decreasing trend of temperature in 21st century.
+
+Although the temperature trend in 21st century may not be convincing enough to reverse the global warming, we can still see that comparing to what has happened in 20th century, the pace has significantly slowed.
+
+\newpage
+
+#3. Detrending
+
+##3.1 Linear Regression Detrending
+
+Thus, before further analysis, we need to detrend the data. We have two ways of detrending the series to make it stationary. One is using the result of linear regression by substracting the `t` term in original series:
+
+$$
+y_t-\alpha_0t-\alpha_1t^2-\alpha_2t^3=\beta_1Q_1(t)+\beta_2Q_2(t)+\beta_3Q_3(t)+\beta_4Q_4(t)+\epsilon_t
+$$
+
+After detrending the data in this method, we again do the linear regression with `t`:
+
+```{r,echo=F,comment=""}
+tempn = temp0 - 0.00068*t
+round(summary(lm(tempn ~ t + Q - 1))$coef[,c(1,4)],2)
+```
+
+We can clearly see that now the series is not dependent on `t`.
+
+##3.2 Differencing
+
+###Lag=1
+
+Another way of detrending is to use differencing method. And in the seasonal model, we can either differencing with `lag=1` or differncing with `lag=4`. Here are the results of linear regression for `lag=1`:
+
+$$
+y_t-y_{t-1}=\gamma_1dQ_1(t)+\gamma_2dQ_2(t)+\gamma_3dQ_3(t)+\gamma_4dQ_4(t)+\epsilon_t
+$$
+
+```{r,echo=F,comment=""}
+tempd = diff(temp0, lag=1)
+dQ = Q[-length(Q)]
+t1 = t[-length(t)]
+round(summary(lm(tempd ~ t1 + dQ - 1))$coef[,c(1,4)],2)
+```
+
+Here it should be explained that because of the differencing method, we can no longer use the notation of every season, instead, here `dQ1` means winter to spring, `dQ2` spring to summer, `dQ3` summer to autumn and `dQ4` autumn to winter. The `t1` here, which stands for the time, is not significant, the R-Squared of the model is 0.96, so the model fits well.
+
+###Lag=4
+
+When we use `lag=4`, the original seanson will lose their meaning, so in this model, I only regress the series with time `t`, here are the results:
+
+```{r,echo=F,comment=""}
+tempd2 = diff(temp0,lag=4)
+t2 = t[-(1:4)]
+round(summary(lm(tempd2 ~ t2))$coef[,c(1,4)],5)
+```
+
+It is obvious that after differencing for both methods, the data also gets rid of its trend.
+
+#4. Seasonal ARIMA
+
+##4.1 General Model
+
+To connect with what we have learnt from the class, I apply the differencing method in the further analysis. In this case, we have differencing and seasonal traits, so we first look at the general situation $ARIMA(p,d,q)(P,1,Q)_4\ (d=0\  or\  1)$, since one year has four seasons, it is reasonable to set number of periods per "season" (namely a year) as 4.
+
+The model is as followed:
+
+$$
+\phi(B)\Phi(B)(1-B)^d(1-B^4)x_t=\theta(B)\Theta(B^4)w_t
+$$
+
+*(From left to right: Non-seasonal AR(p), SAR(P), Non-seasonal differnece(d), Seasonal difference(1), MA(q), SMA(Q))*
+
+##4.2 `sarima(1,1,1,0,1,1,4)`
+
+We look at the acf and pacf plots after detrending and taking seasonal difference:
+
+\begin{center}
+\includegraphics[width=5.3in]{lag1 and lag4.png}
+\end{center}
+
+First consider about the seasonal lags, it is obvious that in seasonal lags, ACF cuts off after `lag=4`, so $Q=1$, and PACF tails off at seasonal lags, so $P=0$. Then, consider about the within seasonal lags. Both ACF and PACF for `lag=1` are significant, we can try models ARMA(1,1), ARMA(2,1) or ARMA(2,3). In order to simplify the model, we should try ARMA(1,1) first to see whether it is enough for fitting the data. Based on the following outputs, we can see that the ARMA(1,1) model fits good, so there is no need to consider more complicated model. 
+
+The following are the plots for residual analysis for the model along with their estimated coefficients, log-likelihood and AIC.
+
+```{r,echo=F,comment="",fig.height=7.7}
+sarima(temp0,1,1,1,0,1,1,4,details=F)$ttable
+```
+
+with $\hat{\sigma}^2=0.8827$, $log likelihood=-1946.71$ and $AIC=0.8794$.
+
+##4.3 `sarima(1,0,1,0,1,1,4)`
+
+Similarly, we can do the same method with serie only taken seasonal differencing. Here is the ACF and PACF plot:
+
+\begin{center}
+\includegraphics[width=5.3in]{lag4.png}\centering
+\end{center}
+
+Same as 4.2, we can see that in seasonal lags, ACF cuts off after `lag=4`, so $Q=1$, and PACF tails off at seasonal lags, so $P=0$, and in this case, within seasonal lags, we can be certain about the ARMA(1,1). So the following are the plots for residual analysis for the model along with their estimated coefficients, log-likelihood and AIC for `sarima(1,0,1,0,1,1,4)`.
+
+\newpage
+
+```{r,echo=F,comment="",fig.height=7.7}
+sarima(temp0,1,0,1,0,1,1,4,details=F)$ttable
+```
+
+with $\hat{\sigma}^2=0.8787$, $log likelihood=-1940.79$, $AIC=0.8777$.
+
+Both models' results are similar, nearly all lags of autocorrelation are close to 0, and the p-value are larger than 0.05, meaning that we cannot reject the null hypothese that the autocorrelation functions between residual are 0, there are few outliers in the normal Q-Q plot and standardized residuals plot, except these, both model fit well, .
+
+
+#5. Forecast
+
+The model formula for `sarima(1,1,1,0,1,1,4)` is:
+
+$$
+(1-0.177B)(1-B)(1-B^4)temp_t=(1-0.96B)(1-0.98B^4)w_t
+$$
+
+And the formula for `sarima(1,0,1,0,1,1,4)` is
+
+$$
+(1-0.677B)(1-B^4)temp_t=(1-0.489B)(1-0.97B^4)w_t
+$$
+
+And the next 14 seasons predictions (from 2017 Summer to 2020 Autumn) along with the plots are (left is sarima(1,1,1,0,1,1), right is sarima(1,0,1,0,1,1)):
+
+\begin{center}
+\includegraphics[width=5.3in]{forecast.png}\centering
+\end{center}
+
+```{r,echo=F,comment="",fig.height=3.5,fig.width=6,fig.align='center'}
+y1=c(16.354269,10.993774,4.949687,9.251636,16.178089,10.971972,4.955211,9.261996,16.189305,10.983340,4.966605,9.273395,16.200706,10.994740)
+y2 = c(16.155738, 10.933240,4.783233,9.034639,15.876340,10.745123,4.656939,8.950218,15.820279,10.708269,4.633094,8.935184,15.811212,10.703244)
+
+mat1 = matrix(c(5.4,10.3,y1), ncol = 4, nrow = 4, byrow = T)
+mat2 = matrix(c(5.4,10.3,y2), ncol = 4, nrow = 4, byrow = T)
+rownames(mat1) = c("2017","2018","2019","2020")
+colnames(mat1) = c("Winter","Spring","Summer","Autumn")
+rownames(mat2) = c("2017","2018","2019","2020")
+colnames(mat2) = c("Winter","Spring","Summer","Autumn")
+set.caption("Forecast with `sarima(1,1,1,0,1,1)`")
+pander(mat1)
+set.caption("Forecast with `sarima(1,0,1,0,1,1)`")
+pander(mat2)
+```
+
+From the predictions we can see that, the temperature predicted in `sarima(1,1,1,0,1,1)` are higher than in `sarima(1,0,1,0,1,1)`, meanwhile, both models suggest the temperature to be mildly decreasing. Futhermore, we can see that the change in following years gradually becomes negligible, which is basically due to prediction of any time series will probably converge to constant. 
